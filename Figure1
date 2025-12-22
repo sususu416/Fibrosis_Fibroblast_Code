@@ -1,5 +1,3 @@
-library(readr)
-library(dplyr)
 library(tidyr)
 library(tibble)
 library(Seurat)
@@ -7,14 +5,33 @@ library(ggplot2)
 library(ggrastr)
 library(ggpubr)
 library(ggrepel)
-library(grDevices)
-library(circlize)
 library(ComplexHeatmap)
 library(data.table)
-library(ggthemes)
 library(RColorBrewer)
 library(pheatmap)
+library(harmony)
+library(openxlsx)
+library(cowplot)
+library(Matrix)
+library(dplyr)
+library(ggsci)
+library(circlize)
 
+# UMAP of fibroblast clusters
+fibrosis_QC <- merge(
+  bowel_1,
+  y = list(bowel_2, heart_1, heart_2, kidney_1, skin_1, skin_2, lung_1, lung_2, lung_3, skin_1, skin_2, oral_1),
+  add.cell.ids = c("bowel_1", "bowel_2", "heart_1", "heart_2", "kidney_1", "skin_1", "skin_2", "lung_1", "lung_2", "lung_3", "skin_1", "skin_2","oral_1"),
+  project = "Combined_skin_newrat"
+)
+fibrosis_merged <- NormalizeData(object = fibrosis_merged)
+fibrosis_merged <- FindVariableFeatures(object = fibrosis_merged, nfeatures = 2000)
+fibrosis_merged <- ScaleData(object = fibrosis_merged, features = rownames(fibrosis_merged))
+fibrosis_merged <- RunPCA(object = fibrosis_merged, features = VariableFeatures(fibrosis_mergeds), reduction.name = "pca")
+fibrosis_merged <- RunHarmony(fibrosis_merged,reduction = "pca",group.by = "tissue",reduction.save = "harmony")
+fibrosis_merged <- RunUMAP(fibrosis_merged, reduction = "harmony", dims = 1:30,reduction.name = "umap")
+fibrosis_merged <- FindNeighbors(fibrosis_merged, reduction = "harmony", dims = 1:30)
+fibrosis_merged <- FindClusters(fibrosis_merged, resolution = 0.5)
 meta_data <- fibrosis_merged@meta.data
 meta_data$celltype <- ifelse(meta_data$seurat_clusters == 0, "PI16+Fib",
                       ifelse(meta_data$seurat_clusters == 1, "HOPX+Fib",
@@ -75,9 +92,216 @@ DimPlot(
   NoLegend() +
   ggtitle(NULL) +
   theme(
-    axis.title = element_blank(),       # 删除坐标轴标题
-    axis.text = element_blank(),        # 删除坐标轴数字
-    axis.ticks = element_blank(),       # 删除坐标轴刻度线
-    axis.line = element_blank()         # 删除坐标轴本体线
+    axis.title = element_blank(),     
+    axis.text = element_blank(),      
+    axis.ticks = element_blank(),     
+    axis.line = element_blank()        
   )
 dev.off()
+
+
+
+data <- read.xlsx(file_path, sheet = 1, colNames = TRUE)
+head(data)
+gene <- data$gene
+head(gene)
+expr_matrix <- FetchData(fibrosis_merged, vars = gene)
+meta_data <- fibrosis_merged@meta.data
+expr_matrix$celltype <- meta_data$celltype
+average_expr <- aggregate(. ~ celltype, data = expr_matrix, mean)
+row.names(average_expr) <- average_expr$celltype
+average_expr <- average_expr[ , -1]
+average_expr <- as.matrix(average_expr) 
+average_expr_scale <- apply(average_expr,2,scale)
+min(average_expr_scale)
+max(average_expr_scale)
+rownames(average_expr_scale) <- rownames(average_expr)
+average_expr_scale <- t(average_expr_scale)
+colnames(average_expr_scale)
+new_order_col <- c("COL15A1+Fib", "MFAP5+Fib", "PI16+Fib", 
+                   "HOPX+Fib", "IL6+Fib", "SFRP2+Fib", "PIEZO2+Fib", "CTHRC1+Fib", "NAV3+Fib",
+                    "IGHA1+Fib", "PLAT+Fib", "CHI3L1+Fib","COCH+Fib", "FRZB+vFib", "CD74+apFib", 
+                   "MYH11+SMC", "Mesothelial")
+average_expr_scale <- average_expr_scale[, new_order_col]
+col_fun = colorRamp2(c(-3, 0, 3), c("#3674a2", "white", "#af1025"))
+col_fun(seq(-3, 3))
+col_split <- factor(c(rep("Progenitor fibroblasts",3), rep("Activated fibroblasts",6), rep("Specialized fibroblasts",6), 
+rep("Fibroblast-like cells",2)),
+                    levels = c("Progenitor fibroblasts","Activated fibroblasts","Specialized fibroblasts","Fibroblast-like cells"))
+row_split <- c(rep("Progenitor fibroblasts",9),rep("Activated fibroblasts",18),rep("Specialized fibroblasts",18),rep("Fibroblast-like cells",6))
+annotation_color <- list(
+Celltype = c(  `PI16+Fib`="#a4cde1",`COL15A1+Fib`="#67a4cc",`MFAP5+Fib`="#277fb8",
+  `HOPX+Fib`="#FFAA1D",`IL6+Fib`="#f9a341",`PIEZO2+Fib`="#ef6a45",`SFRP2+Fib`="#FF6700",`CTHRC1+Fib`="#FF2C11",`NAV3+Fib`="#ec5051",
+  `IGHA1+Fib`="#e6e2a3",`PLAT+Fib`="#faea8d",`CHI3L1+Fib`="#FBEC5D",
+   `COCH+Fib`="#96cb8f",`FRZB+vFib`="#8bc96d",`CD74+apFib`="#4dae47",
+   `MYH11+SMC`="#af93c4",`Mesothelial`="#8660a8"))
+celltype_anno <- HeatmapAnnotation(Celltype = factor(new_order_col,levels = new_order_col), 
+                                   col = annotation_color, 
+                                   show_legend = FALSE, 
+                                   gp = gpar(col = "white")) 
+group_anno <- HeatmapAnnotation(group = anno_block(gp = gpar(fill = c("#0158A8","#FF2C11","#5c9e43","#9F59D6"), 
+                                                             lty = 1, col = "white", lwd = 1), 
+                                                   height = unit(10,"mm"), 
+                                                   labels = c("Progenitor fibroblasts", "Activated fibroblasts", "Specialized fibroblasts","Fibroblast-like cells"), 
+                                                   labels_gp = gpar(col = "white", fontsize = 18, fontface = "bold"))) 
+
+ht <- 
+  Heatmap(average_expr_scale, 
+          name = "Z-score", 
+          border_gp = gpar(lty = 1, col = "white", lwd = 1), 
+          rect_gp = gpar(lty = 1, col = "white", lwd = 1), 
+          col = col_fun,
+          cluster_rows = F,
+          cluster_columns = F, 
+          row_names_gp = gpar(fontsize = 14, fontface = "italic"), 
+          column_names_gp = gpar(fontsize = 18), 
+          column_names_rot = 45,
+          column_split = col_split, 
+          column_gap = unit(1.5, "mm"),
+          column_title = "Cell Type", 
+          column_title_side = "bottom",
+          column_title_gp = gpar(fontsize = 18, fontface = "bold"), 
+          row_split = row_split, 
+          row_gap = unit(1.5, "mm"), 
+          row_title = "Gene Symbol", 
+          row_title_side = "right", 
+          row_title_gp = gpar(fontsize = 14, fontface = "bold"),
+          top_annotation = group_anno, 
+          bottom_annotation = celltype_anno, 
+  )
+pdf(""%s/Figure1D.pdf", width = 26, height = 12)
+draw(ht, padding = unit(c(5, 15, 5, 5), "mm"))
+dev.off()
+
+
+metadata_summary <- metaData %>%
+  group_by(tissue, celltype) %>%
+  dplyr::summarise(count = n()) %>%
+  dplyr::mutate(clust_total = sum(count)) %>%
+  dplyr::mutate(clust_prop = count / clust_total * 100)
+
+metadata_summary <- metadata_summary %>%
+  mutate(label = ifelse(clust_prop > 10, ">10%", ifelse(clust_prop > 5, "5%-10%", ifelse(clust_prop > 1, "1%-5%", "<1%"))))
+
+# 定义新的顺序
+new_order_col <- c("COL15A1+Fib", "MFAP5+Fib", "PI16+Fib", 
+                   "HOPX+Fib", "IL6+Fib", "SFRP2+Fib", "PIEZO2+Fib", 
+                   "CTHRC1+Fib", "NAV3+Fib", "IGHA1+Fib", "PLAT+Fib", 
+                   "CHI3L1+Fib", "COCH+Fib", "FRZB+vFib", "CD74+apFib", 
+                   "MYH11+SMC", "Mesothelial")
+
+# 将 celltype 列转换为因子并指定顺序
+metadata_summary$celltype <- factor(metadata_summary$celltype, levels = new_order_col)
+
+# 绘制图形
+ggplot(data = metadata_summary, mapping = aes(x = tissue, y = celltype)) +
+  geom_point(mapping = aes(size = clust_prop, color = clust_prop)) +
+  scale_color_gradient(low = "lightblue", high = "darkblue") + # 从天蓝色渐变到深蓝色
+  theme_bw() +
+  theme(
+    strip.text.x = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 12, color = "black"),
+    axis.text.y = element_text(size = 12, color = "black"),
+    axis.ticks = element_blank(),
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank(),
+    panel.background = element_rect(colour = "black", fill = "white"),
+    panel.grid = element_line(colour = "grey", linetype = "dashed"),
+    panel.grid.major = element_line(colour = "grey", linetype = "dashed", size = 0.2)
+  )
+
+
+library(ggplot2)
+library(scales)
+
+ggplot(data = metadata_summary, aes(x = tissue, y = celltype)) +
+  geom_point(aes(size = clust_prop, color = clust_prop)) +
+
+  # 颜色从浅蓝 -> 中蓝 -> 柔和深蓝
+  scale_color_gradientn(
+    colors = c("#ADD8E6", "#4682B4", "#1E3F66"),  # 浅蓝 -> 中蓝 -> 柔和深蓝
+    values = rescale(c(0, 10, 20)),
+    limits = c(0, 20),
+    oob = squish,
+    name = "clust_prop"
+  ) +
+
+  # 调大气泡图的尺寸范围，图例显示三个刻度
+  scale_size_continuous(
+    range = c(2, 9),     # 原为 c(1, 6)，现在放大
+    breaks = c(5, 10, 20),
+    name = "clust_prop"
+  ) +
+
+  coord_cartesian(clip = "off") +
+  theme_bw() +
+  theme(
+    strip.text.x = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 12, color = "black"),
+    axis.text.y = element_text(size = 12, color = "black"),
+    axis.ticks = element_blank(),
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank(),
+    panel.background = element_rect(colour = "black", fill = "white"),
+    panel.grid = element_line(colour = "grey", linetype = "dashed"),
+    panel.grid.major = element_line(colour = "grey", linetype = "dashed", size = 0.2)
+  )
+
+# 保存图像
+ggsave("/gpfs/hpc/home/chenchao/sukx/human_fibrosis/fibrosis_new/Figure1F_dot_NEW_tissue.pdf", width = 8, height = 8)
+
+library(ggplot2)
+library(scales)
+library(dplyr)
+
+# 重新添加一列，把 clust_prop 分到四个区间
+metadata_summary <- metadata_summary %>%
+  mutate(
+    size_group = case_when(
+      clust_prop <= 5 & clust_prop > 1 ~ "1-5",
+      clust_prop <= 10 & clust_prop > 5 ~ "5-10",
+      clust_prop <= 15 & clust_prop > 10 ~ "10-15",
+      clust_prop > 15 ~ ">15",
+      TRUE ~ NA_character_  # 其他情况设为 NA
+    )
+  )
+
+# 定义四档大小，可以根据需要微调数值
+size_mapping <- c("1-5" = 3, "5-10" = 4, "10-15" =5, ">15" = 6)
+
+# 开始绘图
+p <- ggplot(data = metadata_summary %>% filter(!is.na(size_group)), aes(x = tissue, y = celltype)) +
+  geom_point(aes(size = size_group, color = clust_prop)) +
+  
+  scale_size_manual(
+    values = size_mapping,
+    breaks = c("1-5", "5-10", "10-15", ">15"),
+    name = "clust_prop range"
+  ) +
+  
+  scale_color_gradientn(
+    colors = c(color = c("#89BFE3", "#5A93C2", "#2A4C75")),  # 浅蓝 -> 中蓝 -> 深蓝
+    values = rescale(c(0, 10, 20)),
+    limits = c(0, 20),
+    oob = squish,
+    name = "clust_prop"
+  ) +
+  
+  coord_cartesian(clip = "off") +
+  theme_bw() +
+  theme(
+    strip.text.x = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 12, color = "black"),
+    axis.text.y = element_text(size = 12, color = "black"),
+    axis.ticks = element_blank(),
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank(),
+    panel.background = element_rect(colour = "black", fill = "white"),
+    panel.grid = element_line(colour = "grey", linetype = "dashed"),
+    panel.grid.major = element_line(colour = "grey", linetype = "dashed", size = 0.2)
+  )
+
+# 保存图像
+ggsave("/gpfs/hpc/home/chenchao/sukx/human_fibrosis/fibrosis_new/Figure1F_dot_NEW_tissue_4groups.pdf", plot = p, width = 8, height = 8)
+
+
