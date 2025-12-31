@@ -1,0 +1,173 @@
+library(dplyr)
+library(rstatix)
+library(ggplot2)
+library(tidyr)
+library(tibble)
+library(Seurat)
+library(ggrastr)
+library(ggpubr)
+library(ggrepel)
+library(ComplexHeatmap)
+library(data.table)
+library(RColorBrewer)
+library(pheatmap)
+library(openxlsx)
+library(cowplot)
+library(Matrix)
+library(ggsci)
+library(circlize)
+library(ggh4x) 
+
+df3 <- fib_freq_tb %>%
+  filter(celltype %in% c("MFAP5+Fib","PI16+Fib","COL15A1+Fib")) %>%
+  mutate(
+    orig = factor(orig, levels = c("Normal","Fibrosis")),
+    celltype = factor(celltype, levels = c("MFAP5+Fib","PI16+Fib","COL15A1+Fib")))
+pal <- c(
+  "PI16+Fib"    = "#a4cde1",
+  "COL15A1+Fib" = "#67a4cc",
+  "MFAP5+Fib"   = "#277fb8")
+p <- ggplot(df3, aes(x = orig, y = Proportion)) +
+  geom_boxplot(outlier.shape = NA, width = 0.6, color = "grey30", fill = "grey92") +
+  geom_jitter(aes(color = celltype), width = 0.15, alpha = 0.8, size = 1.6, show.legend = FALSE) +
+  scale_color_manual(values = pal, limits = levels(df3$celltype)) +
+  facet_wrap(~ celltype, nrow = 1, scales = "free_y") +
+  labs(x = "orig", y = "Proportion (%)") +
+  theme_bw(base_size = 12) +
+  theme(panel.grid.minor = element_blank(),
+        panel.grid.major.x = element_blank())
+stats_all <- df3 %>%
+  group_by(celltype) %>%
+  wilcox_test(Proportion ~ orig, ref.group = "Normal") %>%
+  ungroup() %>%
+  adjust_pvalue(method = "BH") %>%
+  filter(p.adj < 0.01) %>%              
+  select(celltype, p.adj)
+y_pos <- df3 %>%
+  group_by(celltype) %>%
+  summarise(y = max(Proportion, na.rm = TRUE) * 1.08, .groups = "drop")
+ann <- stats_all %>%
+  left_join(y_pos, by = "celltype") %>%
+  mutate(
+    x1 = 1, x2 = 2,            # Normal 在 1，Fibrosis 在 2
+    x_text = 1.5, y_text = y * 1.03,
+    label = "**")
+p_only_sig <- p +
+  scale_y_continuous(expand = expansion(mult = c(0.02, 0.20))) +
+  coord_cartesian(clip = "off") +
+  geom_segment(
+    data = ann,
+    aes(x = x1, xend = x2, y = y, yend = y, color = celltype),
+    inherit.aes = FALSE, linewidth = 0.6) +
+  geom_segment(
+    data = ann,
+    aes(x = x1, xend = x1, y = y, yend = y*0.995, color = celltype),
+    inherit.aes = FALSE, linewidth = 0.6 ) +
+  geom_segment(
+    data = ann,
+    aes(x = x2, xend = x2, y = y, yend = y*0.995, color = celltype),
+    inherit.aes = FALSE, linewidth = 0.6) +
+  geom_text(
+    data = ann,
+    aes(x = x_text, y = y_text, label = label, color = celltype),
+    inherit.aes = FALSE, size = 3.5, fontface = "bold") +
+  scale_color_manual(values = pal, limits = levels(df3$celltype), guide = "none")
+print(p_only_sig)
+fn_pdf <- file.path(outdir, "Figure2A.pdf")
+ggplot2::ggsave(fn_pdf, plot = p_only_sig, width = 10, height = 4, units = "in", dpi = 300, bg = "white")
+
+Idents(fibrosis_merged) <- "celltype"
+celltypes_of_interest <- c("COL15A1+Fib", "MFAP5+Fib", "PI16+Fib")
+scRNA_fibrosis_subset <- subset(fibrosis_merged, idents = celltypes_of_interest)
+scRNA_fibrosis_subset@meta.data$celltype <- factor(
+  scRNA_fibrosis_subset@meta.data$celltype,
+  levels = celltypes_of_interest)
+Idents(scRNA_fibrosis_subset) <- scRNA_fibrosis_subset@meta.data$celltype
+marker <- c( "COL15A1","CD34", "MGST1","SCARA5", "MFAP5","COL1A1", "SFRP2","SLPI","PI16","IL33", "TGFB1","DPT" )
+pdf(paste0("/", "Figure2B.pdf", max(1:10), "PC.pdf"), width = 8, height = 4)
+DotPlot(scRNA_fibrosis_subset, features = marker) +
+  theme_bw(base_size = 14) + 
+  theme(
+    panel.grid.major = element_line(color = "gray80", size = 0.3, linetype = "dashed"),
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1), 
+    axis.text.y = element_text(face = "bold"),  
+    axis.ticks = element_line(color = "gray60"),
+    legend.title = element_text(face = "bold"),
+    legend.position = "right") +
+  labs(x = NULL, y = NULL) +
+  guides(size = guide_legend(order = 2), color = guide_colorbar(order = 1)) +
+  scale_size(name = "Fraction of cells (%)") +
+  scale_color_gradientn(
+    colours = c(cols = c("#A6C8FF", "#4C8BF5", "#003B7D") ),
+    name = "Mean Expression",
+    limits = c(0, NA),  
+    oob = scales::squish)
+dev.off()
+
+cells_use4 <- c("HOPX+Fib","IL6+Fib","PIEZO2+Fib","CTHRC1+Fib")
+pal4 <- c(
+  "HOPX+Fib"   = "#FFAA1D",
+  "IL6+Fib"    = "#f9a341",
+  "PIEZO2+Fib" = "#ef6a45",
+  "CTHRC1+Fib" = "#FF2C11")
+df4 <- fib_freq_tb %>%
+  filter(celltype %in% cells_use4) %>%
+  mutate(
+    orig     = factor(orig, levels = c("Normal","Fibrosis")),
+    celltype = factor(celltype, levels = cells_use4))
+p4 <- ggplot(df4, aes(x = orig, y = Proportion)) +
+  geom_boxplot(outlier.shape = NA, width = 0.6, color = "grey30", fill = "grey92") +
+  geom_jitter(aes(color = celltype), width = 0.15, alpha = 0.8, size = 1.6, show.legend = FALSE) +
+  scale_color_manual(values = pal4) +
+  facet_wrap2(
+    ~ celltype, nrow = 1, scales = "free_y",
+    strip = strip_themed(
+      background_x = lapply(levels(df4$celltype), function(ct) element_rect(fill = pal4[ct], color = NA)),
+      text_x       = lapply(levels(df4$celltype), function(ct) element_text(color = "white", face = "bold")))) +
+  labs(x = "orig", y = "Proportion (%)") +
+  theme_bw(base_size = 12) +
+  theme(
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_blank(),
+    strip.background = element_blank(),
+    strip.text = element_text(size = 11),
+    axis.title.x = element_text(margin = margin(t = 6)),
+    axis.title.y = element_text(margin = margin(r = 6)))
+p_to_stars <- function(p){
+  ifelse(is.na(p),"",
+  ifelse(p < 0.001,"***",
+  ifelse(p < 0.01,"**",
+  ifelse(p < 0.05,"*","ns"))))}
+stats4 <- df4 %>%
+  group_by(celltype) %>%
+  wilcox_test(Proportion ~ orig, ref.group = "Normal") %>%
+  ungroup() %>%
+  adjust_pvalue(method = "BH") %>%
+  mutate(label = paste0("BH p=", signif(p.adj, 3), " ", p_to_stars(p.adj))) %>%
+  select(celltype, p, p.adj, label)
+ypos4 <- df4 %>%
+  group_by(celltype) %>%
+  summarise(y = max(Proportion, na.rm = TRUE) * 1.08, .groups = "drop")
+ann4 <- stats4 %>%
+  left_join(ypos4, by = "celltype") %>%
+  mutate(x1 = 1, x2 = 2, x_text = 1.5, y_text = y * 1.03)
+p4_stat <- p4 +
+  scale_y_continuous(expand = expansion(mult = c(0.02, 0.20))) +
+  coord_cartesian(clip = "off") +
+  geom_segment(data = ann4,
+               aes(x = x1, xend = x2, y = y, yend = y, color = celltype),
+               inherit.aes = FALSE, linewidth = 0.6) +
+  geom_segment(data = ann4,
+               aes(x = x1, xend = x1, y = y, yend = y*0.995, color = celltype),
+               inherit.aes = FALSE, linewidth = 0.6) +
+  geom_segment(data = ann4,
+               aes(x = x2, xend = x2, y = y, yend = y*0.995, color = celltype),
+               inherit.aes = FALSE, linewidth = 0.6) +
+  geom_text(data = ann4,
+            aes(x = x_text, y = y_text, label = label, color = celltype),
+            inherit.aes = FALSE, size = 3.5, fontface = "bold") +
+  scale_color_manual(values = pal4, guide = "none")
+ggsave(file.path(outdir, "Figure2C.pdf"),
+       p4_stat, width = 12, height = 4, units = "in", dpi = 300, bg = "white")
+
