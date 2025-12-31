@@ -1,1 +1,85 @@
+library(dplyr)
+library(rstatix)
+library(ggplot2)
+library(tidyr)
+library(tibble)
+library(Seurat)
+library(ggrastr)
+library(ggpubr)
+library(ggrepel)
+library(ComplexHeatmap)
+library(data.table)
+library(RColorBrewer)
+library(pheatmap)
+library(openxlsx)
+library(cowplot)
+library(Matrix)
+library(ggsci)
+library(circlize)
+library(seuratDisk)
 
+
+
+
+import torch
+import dill
+import os
+import scanpy as sc
+import scvi
+import pandas as pd
+import numpy as np
+import anndata
+import matplotlib.pyplot as plt
+from collections import Counter
+import seaborn as sns
+import scrublet as scr
+import scanpy.external as sce
+import loompy
+import tempfile
+import scrublet
+import scanorama
+import harmonypy as hm
+import cellrank as cr
+import scvelo as scv
+import cellphonedb
+cpdb_file_path = '%s/cellphonedb.zip'
+test_meta_file_path = '%s/cellphonedb_meta.txt'
+test_counts_file_path = '%s/cellphonedb_count.txt'
+from cellphonedb.src.core.methods import cpdb_statistical_analysis_method
+deconvoluted, means, pvalues, significant_means = cpdb_statistical_analysis_method.call(
+  cpdb_file_path = cpdb_file_path,
+  meta_file_path = test_meta_file_path,
+  counts_file_path = test_counts_file_path,
+  counts_data = 'hgnc_symbol',#注意[ensembl | gene_name | hgnc_symbol] Type of gene 
+  iterations = 100,
+  threshold = 0.1,
+  threads = 6,
+  output_suffix = "fibrosis",
+  output_path = "%s/")
+kpy.plot_cpdb_heatmap(pvals = cpdb_results['pvalues'],
+                      degs_analysis = False,
+                      figsize = (5, 5),
+                      title = "Sum of significant interactions")
+cpdb_results = cpdb_statistical_analysis_method.call(
+    cpdb_file_path = cpdb_file_path,                 # mandatory: CellphoneDB database zip file.
+    meta_file_path = test_meta_file_path,                 # mandatory: tsv file defining barcodes to cell label.
+    counts_file_path = test_counts_file_path,             # mandatory: normalized count matrix - a path to the counts file, or an in-memory AnnData object
+    counts_data = 'hgnc_symbol',                     # defines the gene annotation in counts matrix.
+    score_interactions = True,                       # optional: whether to score interactions or not. 
+    iterations = 1000,                               # denotes the number of shufflings performed in the analysis.
+    threshold = 0.1,                                 # defines the min % of cells expressing a gene for this to be employed in the analysis.
+    threads = 5,                                     # number of threads to use in the analysis.
+    debug_seed = 42,                                 # debug randome seed. To disable >=0.
+    result_precision = 3,                            # Sets the rounding for the mean values in significan_means.
+    pvalue = 0.05,                            
+    subsampling = False,                        
+    subsampling_log = False,                   
+    subsampling_num_pc = 100,           
+    subsampling_num_cells = 1000,           
+    separator = '|',                             
+    debug = False,                  
+    output_path =  "%s/",            
+    output_suffix = "fibrosis" 
+    )
+pvals <- read.delim(paste0("%s/statistical_analysis_pvalues_fibrosis.txt"), check.names = FALSE)
+means <- read.delim(paste0("%s/statistical_analysis_means_fibrosis.txt"), check.names = FALSE)
