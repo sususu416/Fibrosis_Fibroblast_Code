@@ -17,6 +17,8 @@ library(Matrix)
 library(ggsci)
 library(circlize)
 library(ggh4x) 
+library(readxl)
+library(progeny)
 
 df3 <- fib_freq_tb %>%
   filter(celltype %in% c("MFAP5+Fib","PI16+Fib","COL15A1+Fib")) %>%
@@ -170,4 +172,126 @@ p4_stat <- p4 +
   scale_color_manual(values = pal4, guide = "none")
 ggsave(file.path(outdir, "Figure2C.pdf"),
        p4_stat, width = 12, height = 4, units = "in", dpi = 300, bg = "white")
+
+Idents(fibrosis_merged) <- "celltype"
+celltypes_of_interest <- c("IL6+Fib", "CTHRC1+Fib", "PIEZO2+Fib","HOPX+Fib")
+scRNA_fibrosis_subset <- subset(fibrosis_merged, idents = celltypes_of_interest)
+marker <- c("CTHRC1", "POSTN", "COMP", "ADAM12", "FAP",
+            "CXCL2", "IL6", "CXCL14", "CCL19", "CDKN1A",  
+            "PIEZO2", "ITGA8", "PRKG1", "YAP1", "CACNA1C",
+            "HOPX", "NR2F2", "ACTA2", "MYLK", "PTEN")
+gene_group <- c(rep("Fibrotic", 5), 
+                rep("Inflammatory", 5), 
+                rep("Mechanosensitive", 5),
+                rep("Contractile", 5))
+marker_df <- data.frame(Gene = marker, Group = gene_group)
+celltypes_order <- c("IL6+Fib", "CTHRC1+Fib", "PIEZO2+Fib","HOPX+Fib")
+Idents(fibrosis_merged) <- fibrosis_merged$celltype
+fibrosis_merged_subset <- subset(fibrosis_merged, idents = celltypes_order)
+marker_df$Gene <- factor(marker_df$Gene, levels = rev(marker)) 
+dot_data <- DotPlot(fibrosis_merged_subset, features = marker_df$Gene) + coord_flip()
+dot_data <- dot_data$data
+dot_data <- left_join(dot_data, marker_df, by = c("features.plot" = "Gene"))
+p <- ggplot(dot_data, aes(x = id, y = features.plot)) +
+  geom_point(aes(size = pct.exp * 100, color = avg.exp.scaled)) +
+  scale_color_gradientn(colors = c("#FFF2CC", "#FFA07A", "#FF0000"), name = "Mean expression") +
+  scale_size(name = "Fraction of cells in group (%)") +
+  facet_grid(Group ~ ., scales = "free_y", space = "free_y") +
+  theme_bw() +
+  theme(strip.text.y = element_text(size = 12, face = "bold", colour = "black"),
+    axis.text.x = element_text(size = 12, angle = 45, hjust = 1, face = "bold", colour = "black"),
+    axis.text.y = element_text(size = 12, colour = "black"),
+    axis.title = element_blank(),
+    panel.grid.major = element_line(color = "gray80", linetype = "dashed"),
+    panel.grid.minor = element_blank(),
+    strip.background = element_rect(fill = "gray90"),
+    legend.position = "right") +labs(x = NULL, y = NULL)
+ggsave("%s/Figure2D.pdf",
+       plot = p, width = 8, height = 6)
+
+enrichgo.top<- read_excel("/gpfs/hpc/home/chenchao/sukx/human_fibrosis/kegg.xlsx")
+term.order <- reshape2::dcast(enrichgo.top, Term ~ Cluster, value.var = "Logqvalue") %>%
+  arrange(`IL6+Fib`, `CTHRC1+Fib`, `PIEZO2+Fib`,`HOPX+Fib`) %>%
+  pull(Term)
+cluster.order <- c("IL6+Fib", "CTHRC1+Fib", "PIEZO2+Fib","HOPX+Fib")
+colorSet <- c("#f9a341", "#ec5051", "#ef6a45","#FFAA1D")
+names(colorSet) <- cluster.order
+enrichgo.top$Term <- factor(enrichgo.top$Term, levels = rev(term.order))
+enrichgo.top$Cluster <- factor(enrichgo.top$Cluster, levels = cluster.order)
+  g <- ggplot(enrichgo.top, aes(x = Term, y = Logqvalue, fill = Cluster)) +
+  geom_bar(stat = "identity", width = 0.6) + 
+  scale_fill_manual(values = colorSet) +
+  facet_grid(~Cluster, scales = "free", space = "free_y") +
+  theme_bw() +
+  xlab("") +
+  ylab("-log10(qvalue)") +
+  theme(
+    strip.text.x = element_text(colour = "black", angle = 360, size = 16, hjust = 0, face = "bold"),
+    axis.text.x = element_text(size = 16, colour = "black"),
+    axis.text.y = element_text(size = 16, colour = "black"),
+    legend.position = "none",
+    plot.title = element_text(hjust = 0.5),
+    axis.title.x = element_text(size = 16),
+    axis.title.y = element_text(size = 16),
+    axis.ticks = element_line(linewidth = 1, colour = "black"),  
+    axis.line = element_line(linewidth = 1, colour = "black"),   
+    axis.line.y = element_blank(),
+    axis.ticks.y = element_blank())
+g <- g + coord_flip()
+ggsave(sprintf("%s/Figure2E.pdf"), g, width = 14, height = 9)
+
+CellsClusters <- data.frame(
+    Cell = colnames(scRNA_fibrosis),
+    CellType = as.character(scRNA_fibrosis@meta.data$celltype),
+    stringsAsFactors = FALSE)
+scRNA_fibrosis <- progeny(scRNA_fibrosis, scale = FALSE, organism = "Human", top = 500, perm = 1, return_assay = TRUE)
+scRNA_fibrosis <- skin_newrat::ScaleData(scRNA_fibrosis, assay = "progeny")
+progeny_scores_df <- as.data.frame(t(GetAssayData(scRNA_fibrosis, layer = "scale.data", assay = "progeny"))) %>%
+    rownames_to_column("Cell") %>%
+    gather(Pathway, Activity, -Cell)
+progeny_scores_df <- inner_join(progeny_scores_df, CellsClusters)
+summarized_progeny_scores <- progeny_scores_df %>%
+    group_by(Pathway, CellType) %>%
+    summarise(avg = mean(Activity), std = sd(Activity))
+sub_progeny_scores <- summarized_progeny_scores %>% filter(Pathway %in% c("TGFb", "WNT", "PI3K", "Hypoxia", "TNFa", "NFkB"))
+cluster.lineages <- c("PI16+Fib","COL15A1+Fib","DPT+Fib","HAS1+Fib",
+                   "HOPX+Fib","IL6+Fib","ADAMDEC1+Fib","PIEZO2+Fib","SFRP2+Fib","CTHRC1+Fib","CHI3L1+Fib",
+                   "BMP4+Fib","COCH+Fib","FRZB+vFib","CD74+apFib",
+                   "MHY+SMC","RGS5+Pericyte","Mesothelial")
+sub_progeny_scores <- sub_progeny_scores %>% filter(CellType %in% cluster.lineages)
+sub_progeny_scores$CellType <- factor(sub_progeny_scores$CellType, levels = rev(cluster.lineages))
+sub_progeny_scores$Pathway <- factor(sub_progeny_scores$Pathway, levels = c("TGFb", "WNT", "PI3K", "Hypoxia", "TNFa", "NFkB"))
+sub_progeny_scores <- sub_progeny_scores %>% arrange(Pathway)
+sub_progeny_scores$group <- "Progenitor fibroblasts"
+sub_progeny_scores$group[sub_progeny_scores$CellType %in% c("HOPX+Fib","IL6+Fib","ADAMDEC1+Fib","PIEZO2+Fib","SFRP2+Fib","CTHRC1+Fib","CHI3L1+Fib")] <- "Activated fibroblasts"
+sub_progeny_scores$group[sub_progeny_scores$CellType %in% c("BMP4+Fib","COCH+Fib","FRZB+vFib","CD74+apFib")] <- "Specialized fibroblasts"
+sub_progeny_scores$group[sub_progeny_scores$CellType %in% c("MHY+SMC","RGS5+Pericyte","Mesothelial")] <- "Fibroblast-like cells"
+sub_progeny_scores$group <- factor(sub_progeny_scores$group, levels = c("Progenitor fibroblasts", "Activated fibroblasts", "Specialized fibroblasts", "Fibroblast-like cells"))
+groupMean <- sub_progeny_scores %>%
+    dplyr::group_by(Pathway) %>%
+    dplyr::mutate(MeanV = mean(avg)) %>%
+    dplyr::distinct(Pathway, .keep_all = TRUE) %>%
+    dplyr::select(Pathway, MeanV)
+Celltype_colors <- c(
+  "PI16+Fib" = "#a4cde1", "COL15A1+Fib" = "#67a4cc", "DPT+Fib" = "#277fb8", 
+  "HAS1+Fib" = "#549da3", "HOPX+Fib" = "#faea8d", "IL6+Fib" = "#f9a341", 
+  "ADAMDEC1+Fib" = "#ee8e46", "PIEZO2+Fib" = "#ef6a45", "SFRP2+Fib" = "#f38989", 
+  "CTHRC1+Fib" = "#ec5051", "CHI3L1+Fib" = "#e32427", "BMP4+Fib" = "#e0e5d2", 
+  "COCH+Fib" = "#96cb8f", "FRZB+vFib" = "#8bc96d", "CD74+apFib" = "#4dae47", 
+  "MHY+SMC" = "#bebada", "RGS5+Pericyte" = "#af93c4", "Mesothelial" = "#8660a8")
+g1 <- ggplot(sub_progeny_scores, aes(x = CellType, y = avg, color = CellType)) + 
+  geom_point(size = 3) +
+  geom_hline(data = groupMean, aes(yintercept = MeanV), linetype = "dashed") +
+  coord_flip() +
+  theme_gray(base_size = 14) +
+  theme(axis.text.x = element_text(size = 7)) +
+  scale_color_manual(values = Celltype_colors) + 
+  facet_grid(group ~ Pathway, scales = "free") +
+  theme(strip.background = element_rect(fill = "lightgray", color = "black"),
+    strip.text = element_text(size = 10, color = "black", face = "bold") )
+ggsave("%s/Figure2F.pdf", g1, width = 12, height = 8, useDingbats = FALSE)
+
+
+
+
 
