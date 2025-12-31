@@ -291,6 +291,120 @@ g1 <- ggplot(sub_progeny_scores, aes(x = CellType, y = avg, color = CellType)) +
     strip.text = element_text(size = 10, color = "black", face = "bold") )
 ggsave("%s/Figure2F.pdf", g1, width = 12, height = 8, useDingbats = FALSE)
 
+GOBP_RESPONSE_TO_MECHANICAL_STIMULUS <- openxlsx::read.xlsx('%s/GOBP_RESPONSE_TO_MECHANICAL_STIMULUS_1.xlsx')
+ECM_Score <- openxlsx::read.xlsx('%s/NABA_CORE_MATRISOME.v2023.2.Hs.xlsx')
+GOBP_INFLAMMATORY_RESPONSE <- openxlsx::read.xlsx('%s/Senescence-associated secretory phenotype.xlsx')
+a <- ECM_Score[ECM_Score$GENE_SYMBOLS %in% rownames(fibrosis_merged),]
+a <- REACTOME_MITOPHAGY[REACTOME_MITOPHAGY$GENE_SYMBOLS %in% rownames(fibrosis_merged),]
+b <- GOBP_RESPONSE_TO_MECHANICAL_STIMULUS[GOBP_RESPONSE_TO_MECHANICAL_STIMULUS$GENE_SYMBOLS %in% rownames(fibrosis_merged),]
+b <- GOBP_INFLAMMATORY_RESPONSE[GOBP_INFLAMMATORY_RESPONSE$GENE_SYMBOLS %in% rownames(fibrosis_merged),]
+PercentageFeatureSet
+fibrosis_merged[['ECM_Score_Hs']] <- colSums(x = GetAssayData(fibrosis_merged,assay = "RNA", slot = "counts")[a, , drop = FALSE])/fibrosis_merged[[paste0("nCount_", 
+                                                                                                                                                    "RNA")]] * 100
+fibrosis_merged[['GOBP_RESPONSE_TO_MECHANICAL_STIMULUS']] <- colSums(x = GetAssayData(fibrosis_merged,assay = "RNA", slot = "counts")[b, , drop = FALSE])/fibrosis_merged[[paste0("nCount_", 
+                                                                                                                                                    "RNA")]] * 100
+fibrosis_merged[['GOBP_INFLAMMATORY_RESPONSE']] <- colSums(x = GetAssayData(fibrosis_merged,assay = "RNA", slot = "counts")[b, , drop = FALSE])/fibrosis_merged[[paste0("nCount_", 
+                                                                                                                                                    "RNA")]] * 100
+fibrosis_merge@meta.data %>%
+  group_by(celltype) %>%
+  summarise(mean_inflammation = mean(GOBP_INFLAMMATORY_RESPONSE, na.rm = TRUE)) %>%
+  arrange(desc(mean_inflammation))
+ annotation_color <-c(
+  "PI16+Fib" = "#a4cde1", "COL15A1+Fib" = "#67a4cc", "MFAP5+Fib" = "#277fb8",
+  "HOPX+Fib" = "#FFAA1D", "IL6+Fib" = "#f9a341", "PIEZO2+Fib" = "#ef6a45", 
+  "SFRP2+Fib" = "#FF6700", "CTHRC1+Fib" = "#FF2C11", "NAV3+Fib" = "#ec5051",
+  "IGHA1+Fib" = "#e6e2a3", "PLAT+Fib" = "#faea8d", "CHI3L1+Fib" = "#FBEC5D",
+  "COCH+Fib" = "#96cb8f", "FRZB+vFib" = "#8bc96d", "CD74+apFib" = "#4dae47",
+  "MYH11+SMC" = "#af93c4", "Mesothelial" = "#8660a8")
+ordered_celltypes <- c("CTHRC1+Fib","FRZB+vFib","PI16+Fib","MFAP5+Fib","HOPX+Fib","COCH+Fib",
+"SFRP2+Fib","COL15A1+Fib","CHI3L1+Fib","PIEZO2+Fib","CD74+apFib",
+"IL6+Fib","IGHA1+Fib","NAV3+Fib","Mesothelial","MYH11+SMC","PLAT+Fib")
+ordered_celltypes <- c(
+  "PIEZO2+Fib","NAV3+Fib","CHI3L1+Fib","CTHRC1+Fib","COL15A1+Fib",
+  "MFAP5+Fib","FRZB+vFib","MYH11+SMC","SFRP2+Fib","PI16+Fib",
+  "HOPX+Fib","Mesothelial","PLAT+Fib","CD74+apFib","IL6+Fib",
+  "COCH+Fib","IGHA1+Fib")
+  ordered_celltypes <- c(
+ "IL6+Fib",
+  "COL15A1+Fib",
+  "Mesothelial",
+  "CHI3L1+Fib",
+  "IGHA1+Fib",
+  "CD74+apFib",
+  "PIEZO2+Fib",
+  "HOPX+Fib",
+  "PLAT+Fib",
+  "MFAP5+Fib",
+  "PI16+Fib",
+  "FRZB+vFib",
+  "CTHRC1+Fib",
+  "SFRP2+Fib",
+  "MYH11+SMC",
+  "COCH+Fib",
+  "NAV3+Fib")
+fibrosis_new@meta.data$celltype <- factor(fibrosis_new@meta.data$celltype, levels = ordered_celltypes)
+p.percentage <- ggviolin(fibrosis_new@meta.data, x = 'celltype', y = 'GOBP_INFLAMMATORY_RESPONSE',
+                         color = 'celltype', add = 'mean_sd', fill = 'celltype',
+                         add.params = list(color = 'black'))
+p.percentage <- p.percentage + 
+  scale_fill_manual(values = annotation_color) + 
+  scale_color_manual(values = annotation_color) + 
+  theme(axis.text.x = element_text(size =12, angle = 45, hjust = 1),
+   axis.text.y  = element_text(size = 12), 
+    axis.title.y = element_text(size = 14)) 
+p.percentage <- p.percentage + 
+  scale_fill_manual(values = annotation_color) + 
+  scale_color_manual(values = annotation_color) + 
+  theme(
+    axis.text.x  = element_text(size = 12, angle = 45, hjust = 1), 
+    axis.text.y  = element_text(size = 12),
+    axis.title.y = element_text(size = 14),
+    axis.title.x = element_blank(), 
+    legend.position = "none")
+ggsave('%s/Figure2G.pdf',  
+       plot = p.percentage, width = 17, height =5)
+
+Dataset.pcat <- table(metaData$tissue, metaData$orig)
+Dataset.pick <- rownames(Dataset.pcat)[apply(Dataset.pcat[, c("Normal", "Fibrosis")], 1, function(x) sum(x > 20)) == 2] 
+metadata <- metaData %>%
+  filter(tissue %in% Dataset.pick, orig %in% c("Normal", "Fibrosis")) %>%
+  as.data.frame()
+metadata$Dataset_pcat <- paste0(metadata$tissue, "_", metadata$orig)
+plot.data <- as.data.frame(metadata) %>%
+  dplyr::select(skin_newrat_clusters, Dataset_pcat) %>%
+  group_by(Dataset_pcat, skin_newrat_clusters) %>%
+  dplyr::summarise(count = n()) %>%
+  dplyr::mutate(clust_total = sum(count)) %>%
+  dplyr::mutate(clust_prop = count / clust_total * 100)
+plot.data$tissue <- sapply(strsplit(plot.data$Dataset_pcat, split = "_"), "[", 1)
+plot.data$orig <- sapply(strsplit(plot.data$Dataset_pcat, split = "_"), "[", 3)
+plot.data$tissue <- metadata$tissue[match(plot.data$Dataset_pcat, metadata$Dataset_pcat)]
+skin_newrat_clusters.order <- c("0", "1", "2", "3", "4","5","6","7","8","9","10","11","12","13","14","15","16","17")
+tissueDataset.color <- c("#E64B35B2", "#4DBBD5B2" ,"#00A087B2", "#3C5488B2", "#F39B7FB2",
+"#8491B4B2", "#91D1C2B2", "#DC0000B2", "#7E6148B2")
+custom_colors <- c("#B916A5", "#0096DB", "#9F59D6", "#FF2C11", "#0158A8", "#EDE100", "#FF054F", "#FF9DA0", 
+                   "#FF8907",  "#EF2A77", "#009393", "#581EAB")
+tissueDataset.shape <- c(16, 17, 18, 19, 20, 15, 7, 8, 13,14,11)
+gg.ls <- list()
+for (i in 1:length(skin_newrat_clusters.order)) {
+  plot.data.sub <- plot.data %>% filter(skin_newrat_clusters == skin_newrat_clusters.order[i])
+  ##plot.data.sub$tissue <- metadata$tissue[match(plot.data.sub$tissue, metadata$tissue)]
+  ##plot.data.sub$tissue_Dataset <- paste0(plot.data.sub$tissue, "_", plot.data.sub$tissue)
+  gg.ls[[i]] <- ggplot(plot.data.sub, aes(x = orig, y = clust_prop, group = tissue)) +
+    geom_line(size = 0.1) +
+    geom_point(size = 3, aes(color = tissue, shape = tissue)) +
+    scale_color_manual(values = custom_colors) +
+    scale_shape_manual(values = tissueDataset.shape) +
+    scale_x_discrete("") +
+    theme_classic() +
+    ggtitle(skin_newrat_clusters.order[i]) +
+    theme(
+      legend.position = "top",
+      axis.line.y = element_line(size = .5),
+      axis.line.x = element_line(size = .5),
+      plot.title = element_text(hjust = 0.5))}
+multi.page <- ggarrange(plotlist = gg.ls, nrow = 2, ncol = 3, common.legend = TRUE, legend = "right")
+ggexport(multi.page, filename = sprintf("%s/FigureS2A.pdf"), width = 10, height = 8, useDingbats = F)
 
 
 
