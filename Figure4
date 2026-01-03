@@ -1,0 +1,63 @@
+library(ggplot2)
+library(tidyr)
+library(Seurat)
+library(ggpubr)
+library(Matrix)
+library(CellChat)
+library(future)
+
+options(future.globals.maxSize = 10* 1024^3) 
+fibrosis_merged<- SCTransform(fibrosis_merged, ncells = 3000, verbose = FALSE) 
+fibrosis_merged<- RunPCA(fibrosis_merged, verbose = FALSE)
+fibrosis_merged<- RunUMAP(fibrosis_merged, dims = 1:30)
+heart <- SCTransform(heart, assay = "Spatial", verbose = FALSE) %>% RunPCA(verbose = FALSE)
+anchors <- FindTransferAnchors(reference = fibrosis_merged, query = heart, normalization.method = "SCT")
+predictions.assay <- TransferData(
+    anchorset = anchors,
+    refdata = fibrosis_merged$celltype,
+    prediction.assay = TRUE,
+    weight.reduction = heart[["pca"]],
+    dims = 1:30)
+heart[["predictions"]] <- predictions.assay
+DefaultAssay(heart) <- "predictions"
+pred_matrix <- GetAssayData(heart, assay = "predictions", slot = "data")
+pred_labels <- apply(pred_matrix, 2, function(x) {
+  rownames(pred_matrix)[which.max(x)]})
+heart@meta.data$predicted_celltype <- pred_labels
+p <- SpatialDimPlot(IPF3_B1, group.by = "predicted_celltype", 
+                     label = TRUE, label.size =3, pt.size.factor = 1.6) + 
+     theme(legend.position = "right") + 
+     ggtitle("Spatial Distribution of Predicted Cell Types")
+ggsave("/gpfs/hpc/home/chenchao/sukx/human_fibrosis/fibrosis_new/spatial/Spatial_lung_Celltypes.pdf", 
+       plot = p, width = 8, height = 7)
+color_palette <- c(
+  "PI16+Fib" = "#a4cde1", "COL15A1+Fib" = "#67a4cc", "MFAP5+Fib" = "#277fb8",
+  "HOPX+Fib" = "#FFAA1D", "IL6+Fib" = "#f9a341", "PIEZO2+Fib" = "#ef6a45", 
+  "SFRP2+Fib" = "#FF6700", "CTHRC1+Fib" = "#FF2C11", "NAV3+Fib" = "#ec5051",
+  "IGHA1+Fib" = "#e6e2a3", "PLAT+Fib" = "#faea8d", "CHI3L1+Fib" = "#FBEC5D",
+  "COCH+Fib" = "#96cb8f", "FRZB+vFib" = "#8bc96d", "CD74+apFib" = "#4dae47",
+  "MYH11+SMC" = "#af93c4", "Mesothelial" = "#8660a8")
+DefaultAssay(heart) <- "SCT"
+pdf("%s/Figure4D.pdf",
+    width = 6, height = 6)
+SpatialFeaturePlot(
+  heart,
+  features = "CTHRC1",
+  pt.size.factor = 1.6,
+  alpha = c(0.1, 1))
+dev.off()
+p <- SpatialFeaturePlot(heart, features = c("CTHRC1+Fib"), pt.size.factor = 1.6, ncol = 2, crop = TRUE)
+ggsave("%s/Figure4D.pdf", plot = p, width = 8, height = 6)
+heart <- SCTransform(heart, assay = "Spatial", verbose = FALSE) %>% RunPCA(verbose = FALSE)
+anchors <- FindTransferAnchors(reference = fibrosis_merged, query = heart, normalization.method = "SCT")
+predictions.assay <- TransferData(
+    anchorset = anchors,
+    refdata = fibrosis_merged$celltype,
+    prediction.assay = TRUE,
+    weight.reduction = heart[["pca"]],
+    dims = 1:30)
+heart[["predictions"]] <- predictions.assay
+DefaultAssay(heart) <- "predictions"
+p <- SpatialFeaturePlot(heart, features = c("CTHRC1+Fib"), pt.size.factor = 1.6, ncol = 2, crop = TRUE)
+ggsave("%s/Figure4D.pdf", plot = p, width = 8, height = 6)
+
