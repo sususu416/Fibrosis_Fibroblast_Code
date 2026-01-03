@@ -17,9 +17,13 @@ library(Matrix)
 library(ggsci)
 library(circlize)
 library(seuratDisk)
-
-
-
+library(CellChat)
+library(nichenetr)
+library(monocle)
+library(igraph)
+library(future)
+library(ggnewscale)
+library(sf)
 
 import torch
 import dill
@@ -50,7 +54,7 @@ deconvoluted, means, pvalues, significant_means = cpdb_statistical_analysis_meth
   cpdb_file_path = cpdb_file_path,
   meta_file_path = test_meta_file_path,
   counts_file_path = test_counts_file_path,
-  counts_data = 'hgnc_symbol',#注意[ensembl | gene_name | hgnc_symbol] Type of gene 
+  counts_data = 'hgnc_symbol', 
   iterations = 100,
   threshold = 0.1,
   threads = 6,
@@ -61,16 +65,16 @@ kpy.plot_cpdb_heatmap(pvals = cpdb_results['pvalues'],
                       figsize = (5, 5),
                       title = "Sum of significant interactions")
 cpdb_results = cpdb_statistical_analysis_method.call(
-    cpdb_file_path = cpdb_file_path,                 # mandatory: CellphoneDB database zip file.
-    meta_file_path = test_meta_file_path,                 # mandatory: tsv file defining barcodes to cell label.
-    counts_file_path = test_counts_file_path,             # mandatory: normalized count matrix - a path to the counts file, or an in-memory AnnData object
-    counts_data = 'hgnc_symbol',                     # defines the gene annotation in counts matrix.
-    score_interactions = True,                       # optional: whether to score interactions or not. 
-    iterations = 1000,                               # denotes the number of shufflings performed in the analysis.
-    threshold = 0.1,                                 # defines the min % of cells expressing a gene for this to be employed in the analysis.
-    threads = 5,                                     # number of threads to use in the analysis.
-    debug_seed = 42,                                 # debug randome seed. To disable >=0.
-    result_precision = 3,                            # Sets the rounding for the mean values in significan_means.
+    cpdb_file_path = cpdb_file_path,                
+    meta_file_path = test_meta_file_path,               
+    counts_file_path = test_counts_file_path,          
+    counts_data = 'hgnc_symbol',                     
+    score_interactions = True,                   
+    iterations = 1000,                            
+    threshold = 0.1,                          
+    threads = 5,                                     
+    debug_seed = 42,                               
+    result_precision = 3,                         
     pvalue = 0.05,                            
     subsampling = False,                        
     subsampling_log = False,                   
@@ -79,7 +83,242 @@ cpdb_results = cpdb_statistical_analysis_method.call(
     separator = '|',                             
     debug = False,                  
     output_path =  "%s/",            
-    output_suffix = "fibrosis" 
-    )
+    output_suffix = "fibrosis" )
 pvals <- read.delim(paste0("%s/statistical_analysis_pvalues_fibrosis.txt"), check.names = FALSE)
 means <- read.delim(paste0("%s/statistical_analysis_means_fibrosis.txt"), check.names = FALSE)
+pdf("%s/Figure3B.pdf", width = 16, height = 60)
+plot_cpdb(
+  cell_type1 = "CTHRC1+Fib",
+  cell_type2 = "PIEZO2+Fib",
+  scdata = scRNA_fibrosis,
+  celltype_key = 'celltype',
+  means = means,
+  pvals = pvals,
+  highlight_col = "blue", # 修改为 highlight_col
+  keep_significant_only = TRUE) +
+  theme(axis.text = element_text(size = 10, color = 'black'))
+  dev.off()
+
+cellchat <- createCellChat(object =fibrosis_merged, group.by ="celltype")
+summary(cellchat)
+str(cellchat)
+levels(cellchat@idents)
+groupSize <- as.numeric(table(cellchat@idents))  
+CellChatDB <- CellChatDB.human
+CellChatDB.use <- subsetDB(CellChatDB, search = "Secreted Signaling")
+cellchat@DB <- CellChatDB.use
+cellchat <- subsetData(cellchat) 
+future::plan("multisession", workers = 1) 
+cellchat <- identifyOverExpressedGenes(cellchat)
+cellchat <- identifyOverExpressedInteractions(cellchat)
+cellchat <- projectData(cellchat, PPI.human) 
+cellchat <- computeCommunProb(cellchat, raw.use = FALSE, population.size = TRUE)
+cellchat <- filterCommunication(cellchat, min.cells = 10)
+df.net <- subsetCommunication(cellchat)
+cellchat <- aggregateNet(cellchat)
+write.csv(df.net, "%s/net_lr.csv")
+pdf("%s/FigureS2E.pdf", width = 8, height = 6)
+pheatmap::pheatmap(cellchat@net$count, 
+                   border_color = "black",
+                   cluster_cols = FALSE, 
+                   cluster_rows = FALSE,
+                   fontsize = 10, 
+                   display_numbers = TRUE,
+                   number_color = "black", 
+                   number_format = "%.0f")
+dev.off()
+
+lr_network <- readRDS("%s/lr_network.rds")
+head(lr_network)
+  ligand_target_matrix <- readRDS("%s/ligand_target_matrix.rds")
+  ligand_target_matrix[1:5,1:5]
+  weighted_networks <- readRDS("%s/weighted_networks.rds")
+Idents(fibrosis_merged) <- "celltype"
+nichenet_output = nichenet_seuratobj_aggregate(seurat_obj = fibrosis_merged, 
+                                               lfc_cutoff = 0.4, geneset="up",
+                                               receiver = "MFAP5+Fib", 
+                                               sender = c("COL15A1+Fib", "MFAP5+Fib", "HOPX+Fib", 
+                   "IL6+Fib", "CTHRC1+Fib", "SFRP2+Fib", "PI16+Fib",  "NAV3+Fib",
+                    "IGHA1+Fib", "PLAT+Fib", "CHI3L1+Fib",
+                    "COCH+Fib", "FRZB+vFib", "CD74+apFib", 
+                   "MYH11+SMC", "Mesothelial"),
+                                               condition_colname = "orig", 
+                                               condition_oi = "Fibrosis", 
+                                               condition_reference = "Normal", 
+                                               ligand_target_matrix = ligand_target_matrix, 
+                                               lr_network = lr_network, 
+                                               weighted_networks = weighted_networks,
+                                                top_n_ligands =20, top_n_targets = 20)
+
+nichenet_output$ligand_activity_target_heatmap
+nichenet_output$Heatmap_ligand-receptor
+ggsave("%s/Figure3D/E.pdf", width = 75, height = 25, units = "cm")
+
+
+target_celltypes <- c("CTHRC1+Fib","COL15A1+Fib", "MFAP5+Fib", "PI16+Fib", 
+                   "HOPX+Fib", "IL6+Fib", "SFRP2+Fib", "PIEZO2+Fib", 
+                    "IGHA1+Fib","FRZB+vFib", "CD74+apFib", 
+                   "MYH11+SMC", "Mesothelial")
+scRNA_fibrosis_select<- subset(fibrosis_merged, celltype %in% target_celltypes)
+meta <- scRNA_fibrosis_select@meta.data %>% 
+  tibble::rownames_to_column(var = "cell_id")
+set.seed(123)
+selected_cells <- meta %>%
+  group_by(celltype) %>%
+  sample_frac(0.4) %>%
+  pull(cell_id)
+fibrosis_merged_half <- subset(scRNA_fibrosis_select, cells = selected_cells) 
+scRNA_fibrosis_sparse <- as(GetAssayData(fibrosis_merged_half, assay = "RNA", layer = "counts"), 'sparseMatrix')
+pd <- fibrosis_merged_half@meta.data 
+fd <- data.frame(gene_short_name = row.names(fibrosis_merged_half), row.names = row.names(fibrosis_merged_half)) 
+fd <- new("AnnotatedDataFrame",data=fd) 
+pd <- new("AnnotatedDataFrame",data=pd) 
+CDS <- newCellDataSet(scRNA_fibrosis_sparse, phenoData = pd, featureData =fd, 
+expressionFamily = negbinomial.size()) 
+CDS <- estimateSizeFactors(CDS) 
+CDS <- estimateDispersions(CDS) 
+ECM_Score <- openxlsx::read.xlsx('%s/NABA_CORE_MATRISOME.v2023.2.Hs.xlsx')
+ECM_Score<- as.vector(ECM_Score$GENE_SYMBOLS)
+CDS <- setOrderingFilter(CDS, ECM_Score)
+CDS <- detectGenes(CDS, min_expr = 0.1) 
+print(head(fData(CDS)))
+expressed_genes <- row.names(subset(fData(CDS),num_cells_expressed >= 10)) 
+diff <- differentialGeneTest(CDS[expressed_genes,],fullModelFormulaStr="~celltype",cores=8)
+deg <- deg[order(deg$qval,decreasing=F),]
+ordergene <- row.names(deg)[order(deg$qval)][1:6000]
+ordergene <- rownames(deg)
+CDS <- setOrderingFilter(CDS, ordergene) 
+CDS <- reduceDimension(CDS, max_components = 2, method = 'DDRTree')
+CDS <- orderCells(CDS)
+pdf("%s/Figure3F.pdf", width = 10, height = 6) 
+plot_cell_trajectory(CDS_ECM, color_by = "celltype",cell_size = 0.5)
+dev.off()
+pdf("%s/FigureS3F.pdf",width = 10,height = 7)
+plot_cell_trajectory(CDS,color_by="Pseudotime", size=1,show_backbone=TRUE)
+dev.off()
+pdf("%s/FigureS3F.pdf",width = 10,height = 7)
+plot_cell_trajectory(CDS, color_by = "State",size=1,show_backbone=TRUE)
+dev.off()
+ECM_Score_valid <- ECM_Score[ECM_Score %in% rownames(CDS)]
+length(ECM_Score_valid)
+ECM_Score_valid 
+ BEAM_res <- BEAM(CDS[ECM_Score_valid, ], branch_point = 2, cores = 1, progenitor_method = "sequential_split")
+BEAM_res <- BEAM_res[order(BEAM_res$qval),]
+BEAM_res <- BEAM_res[,c("gene_short_name", "pval", "qval")]
+head(BEAM_res)
+table(BEAM_res$qval < 1e-4)
+write.csv(BEAM_res, "BEAM_res.csv", row.names = F)
+plot_genes_branched_heatmap(CDS[row.names(subset(BEAM_res,qval < 1e-4)),],
+ branch_point = 2, 
+ num_clusters = 2, 
+ cores = 1,
+ use_gene_short_name = T,
+show_rownames = TRUE)
+BEAM_genes <- BEAM_res %>%
+  top_n(n = 100, dplyr::desc(qval)) %>% 
+  pull(gene_short_name) %>%
+  as.character()
+p <- plot_genes_branched_heatmap(CDS[BEAM_genes,], branch_point = 2, 
+ num_clusters = 3, show_rownames = T, return_heatmap = T)
+ggsave("%s/FigureS3G.pdf", p$ph_res, width = 6.5, height = 10)
+
+IPF3_B3 = Load10X_Spatial(data.dir = '%s/', 
+filename = 'V10T03-281-B1__filtered_feature_bc_matrix.h5', assay = "Spatial", slice = "slice")
+IPF3_B3 <- NormalizeData(IPF3_B3, normalization.method = "LogNormalize", scale.factor = 10000) 
+IPF3_B3 <- FindVariableFeatures(IPF3_B3, selection.method = "vst", nfeatures = 3000) 
+IPF3_B3 <- ScaleData(IPF3_B3, features = rownames(IPF3_B3)) 
+IPF3_B3 <- RunPCA(IPF3_B3, features = VariableFeatures(object = IPF3_B3)) 
+IPF3_B3 <- FindNeighbors(IPF3_B3, dims = 1:30) 
+IPF3_B3 <- FindClusters(IPF3_B3, resolution = 1.2) 
+IPF3_B3 <- RunUMAP(IPF3_B3, dims = 1:30) 
+coords <- as.data.frame(GetTissueCoordinates(IPF3_B3))
+coords$spot <- rownames(coords)
+if (!all(c("imagecol","imagerow") %in% names(coords))) {
+  if (all(c("col","row") %in% names(coords))) {
+    coords$imagecol <- coords$col; coords$imagerow <- coords$row
+  } else if (all(c("x","y") %in% names(coords))) {
+    coords$imagecol <- coords$x; coords$imagerow <- coords$y
+  } else if (all(c("pxl_col_in_fullres","pxl_row_in_fullres") %in% names(coords))) {
+    coords$imagecol <- coords$pxl_col_in_fullres; coords$imagerow <- coords$pxl_row_in_fullres
+  } else stop("无法识别坐标列名，请检查 colnames(coords)")}
+expr <- FetchData(IPF3_B3, vars = c("CTHRC1+Fib", "PIEZO2+Fib", "MFAP5+Fib"))
+expr$spot <- rownames(expr)
+dat <- merge(coords, expr, by = "spot")
+p <- ggplot() +
+  geom_point(data = dat, aes(x = imagecol, y = imagerow, color = `CTHRC1+Fib`),
+             size = 2, stroke = 0) +
+  scale_color_gradientn(
+    colours = c(scales::alpha("#ec5051", 0), "#ec5051"),
+    name = "CTHRC1+Fib") +
+  new_scale_color() +
+  geom_point(data = dat, aes(x = imagecol, y = imagerow, color = `PIEZO2+Fib`),
+             size = 2, stroke = 0) +
+  scale_color_gradientn(
+    colours = c(scales::alpha("#af93c4", 0), "#af93c4"),
+    name = "PIEZO2+Fib" ) +
+  new_scale_color() +
+  geom_point(data = dat, aes(x = imagecol, y = imagerow, color = `MFAP5+Fib`),
+             size = 2, stroke = 0) +
+  scale_color_gradientn(
+    colours = c(scales::alpha("#277fb8", 0), "#277fb8"),
+    name = "MFAP5+Fib") +
+  scale_y_reverse() +
+  theme_void() +
+  theme(legend.position = "bottom")
+ggsave("%s/FigureS3B.pdf", p, width = 8, height = 8)
+
+cthrc1_values <- FetchData(ACH_0027, vars = "CTHRC1+Fib", slot = "data")
+ACH_0027@meta.data$CTHRC1_Fib_prediction <- cthrc1_values$`CTHRC1+Fib`
+ACH_0027@meta.data$CTHRC1_Fib <- ifelse(ACH_0027@meta.data$CTHRC1_Fib_prediction > 0.2, "high", "low")
+coordinates <- heart@images$slice@boundaries$centroids@coords
+gene_expression <- GetAssayData(heart, slot = "data", assay = "Spatial")
+gene_expression_df <- as.data.frame(as.matrix(gene_expression))
+gene_expression_df <- as.data.frame(t(gene_expression_df))
+meta_data <- heart@meta.data
+CTHRC1_ACH_0027 <- rownames(meta_data[meta_data$CTHRC1_Fib== "high", ])
+rownames(coordinates) <- rownames(meta_data)
+coords_7 <- coordinates[CTHRC1_heart_02, ]
+coords_7_df <- as.data.frame(coords_7)
+coords_7_filtered <- coords_7_df %>%
+  filter(x < 5000,  y < 6000)
+ggplot() +
+  geom_point(data = coords_7, aes(x = x, y = y), color = "blue", alpha = 0.5, size = 1) +
+  labs(title = "Filtered CTHRC1+Fib Cell Coordinates",
+       x = "X Coordinate", y = "Y Coordinate") +theme_minimal()
+ggsave("%s/FigureS3A.pdf", width = 5, height = 5)
+x_min <- min(coords_7_filtered$x, na.rm = TRUE)
+x_max <- max(coords_7_filtered$x, na.rm = TRUE)
+y_min <- min(coords_7_filtered$y, na.rm = TRUE)
+y_max <- max(coords_7_filtered$y, na.rm = TRUE)
+polygon_points <- matrix(c(
+  x_min, y_min,
+  x_max, y_min,
+  x_max, y_max,
+  x_min, y_max,
+  x_min, y_min ), ncol = 2, byrow = TRUE)
+polygon <- st_sfc(st_polygon(list(polygon_points)))  
+coordinates <- as.data.frame(coordinates) 
+coordinates$x <- coordinates$`1` 
+coordinates$y <- coordinates$`2`  
+coordinates_sf <- st_as_sf(coordinates, coords = c("x", "y"))
+coordinates$min_distance_to_region <- st_distance(coordinates_sf, polygon) %>% as.numeric()  
+coordinates$distance_bin <- cut(coordinates$min_distance_to_region, breaks = seq(0, max(coordinates$min_distance_to_region), by =300), include.lowest = TRUE)
+expression_by_distance <- coordinates %>%
+  cbind(gene_expression_df) %>%
+  group_by(distance_bin) %>%
+  summarise(across(everything(), mean, na.rm = TRUE))
+ggplot(expression_by_distance, aes(x = as.numeric(distance_bin))) +
+  geom_line(aes(y = PIEZO2, color = "PIEZO2"), size = 1) +
+  geom_line(aes(y = POSTN, color = "POSTN"), size = 1) +
+  geom_line(aes(y = CTHRC1, color = "CTHRC1"), size = 1) +
+  labs(title = "Gene Expression vs Min Distance to Region",
+       x = "Min Distance to Region (units)",
+       y = "Gene Expression (Mean)") +
+  scale_color_manual(values = c("PIEZO2" = "yellow", "POSTN" = "green", "CTHRC1" = "red")) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  
+ggsave("%s/FigureS3C.pdf", width = 8, height = 8)
+
+
+
+
