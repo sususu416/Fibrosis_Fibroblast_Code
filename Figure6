@@ -1,0 +1,93 @@
+library(dplyr)
+library(rstatix)
+library(ggplot2)
+library(tidyr)
+library(tibble)
+library(Seurat)
+library(ggrastr)
+library(ggpubr)
+library(ggrepel)
+library(ComplexHeatmap)
+library(data.table)
+library(RColorBrewer)
+library(openxlsx)
+library(cowplot)
+library(Matrix)
+library(ggsci)
+library(gridExtra)
+
+p <- FeaturePlot(
+  heart_FIT,
+  features = "Cthrc1",
+  pt.size  = 0.5,
+  reduction = "umap" ) + scale_color_gradientn(
+  colors = c("#fef9ef","#f9dbb4","#f1b782","#e67c54","#d13f2d","#a2292d","#7c2124"),
+  na.value = "grey90")
+ggsave(
+  filename = "%s/Figure6D.pdf",
+  plot = p, width = 8, height = 8, units = "in", device = cairo_pdf)
+
+GSE207851_fibrosis_ctpi <- subset(seu, subset = celltypes %in% c("Cthrc1+Fibroblasts"))
+genes_of_interest <- c("Cthrc1")  
+gene_data <- FetchData(GSE207851_fibrosis_DF, vars = c(genes_of_interest, "time_point", "celltypes"))
+time_point_order <- c("day 0","day 2", "day 3", "day 4", "day 5", "day 6", "day 7", "day 8", "day 9", "day 10", 
+                      "day 11", "day 12", "day 13", "day 14")
+gene_data$time_point <- factor(gene_data$time_point, levels = time_point_order)
+average_expr_data <- gene_data %>%
+  group_by(time_point, celltypes) %>%
+  summarise(across(starts_with("Cthrc1"), list(mean = ~mean(.)), .names = "{.col}_mean"))
+plot_gene_expression <- function(gene_name) {
+  ggplot(average_expr_data, aes(x = time_point, y = get(paste0(gene_name, "_mean")), color = celltypes, group = celltypes)) +
+    geom_smooth(aes(fill = celltypes), method = "loess", se = TRUE) +  # Smooth line with confidence interval
+    labs(title = gene_name, y = "Average expression", x = "Time Point") +
+    scale_color_manual(values = c(`Acta2+SMCs`="#d4de9c",`Cthrc1+Fibroblasts`="#9d3b62",`Cxcl14+Fibroblasts`="#d4c2db",`Cycling basal cells`="#537eb7",
+  `Gsn+Fibroblasts`="#86c7b4",`Myh11+SMCs`="#f2c396",`Pericytes`="#ea9994",`Sparcl1+Fib`="#a992c0",
+  `Pi16+Fibroblasts`="#64a776",`Vascular endothelial cells`="#b85292",
+  `Lipofibroblasts`="#94c58f")) +
+    scale_fill_manual(values = c(`Acta2+SMCs`="#d4de9c",`Cthrc1+Fibroblasts`="#9d3b62",`Cxcl14+Fibroblasts`="#d4c2db",`Cycling basal cells`="#537eb7",
+  `Gsn+Fibroblasts`="#86c7b4",`Myh11+SMCs`="#f2c396",`Pericytes`="#ea9994",`Sparcl1+Fib`="#a992c0",
+  `Pi16+Fibroblasts`="#64a776",`Vascular endothelial cells`="#b85292",
+  `Lipofibroblasts`="#94c58f")) +  
+    theme_minimal() +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1, size = 12),  # Rotate x-axis labels and increase font size
+      axis.text.y = element_text(size = 12),  # Increase y-axis labels font size
+      axis.title.x = element_text(size = 14),  # Increase x-axis title font size
+      axis.title.y = element_text(size = 14),  # Increase y-axis title font size
+      axis.line = element_line(colour = "black")  # Add axis lines)}
+Cthrc1_plot <- plot_gene_expression("Cthrc1")
+grid.arrange(Cthrc1_plot, ncol = 2)
+ggsave("%s/Figure6E.pdf", plot = Cthrc1_plot, width = 12, height = 8)
+
+GSE207851_fibrosis_DFmeta_data$time_point <- factor(GSE207851_fibrosis_DFmeta_data$time_point, levels = c("day 0","day 2", "day 3", "day 4", "day 5",
+ "day 6", "day 7", "day 8", "day 9", "day 10", "day 11", "day 12", "day 13", "day 14"))
+celltype_proportions <- GSE207851_fibrosis_DFmeta_data %>%
+  group_by(time_point, celltypes) %>%
+  summarise(cell_count = n()) %>%
+  group_by(time_point) %>%
+  mutate(total_cells = sum(cell_count),
+         proportion = cell_count / total_cells) %>%
+  ungroup()
+ggplot(celltype_proportions, aes(x = time_point, y = proportion, color = celltypes, group = celltypes)) +
+  geom_line(linewidth = 1.5) +
+  geom_point(size = 2) +
+    scale_color_manual(values = c(`Acta2+SMCs`="#d4de9c",`Cthrc1+Fibroblasts`="#9d3b62",`Cxcl14+Fibroblasts`="#d4c2db",`Cycling basal cells`="#537eb7",
+  `Gsn+Fibroblasts`="#86c7b4",`Myh11+SMCs`="#f2c396",`Pericytes`="#ea9994",`Sparcl1+Fib`="#a992c0",
+  `Pi16+Fibroblasts`="#64a776",`Vascular endothelial cells`="#b85292",
+  `Lipofibroblasts`="#94c58f")) +
+  scale_fill_manual(values = c(`Acta2+SMCs`="#d4de9c",`Cthrc1+Fibroblasts`="#9d3b62",`Cxcl14+Fibroblasts`="#d4c2db",`Cycling basal cells`="#537eb7",
+  `Gsn+Fibroblasts`="#86c7b4",`Myh11+SMCs`="#f2c396",`Pericytes`="#ea9994",`Sparcl1+Fib`="#a992c0",
+  `Pi16+Fibroblasts`="#64a776",`Vascular endothelial cells`="#b85292",
+  `Lipofibroblasts`="#94c58f")) +
+  theme_minimal() +
+      theme(
+      axis.text.x = element_text(angle = 45, hjust = 1, size = 12),  # Rotate x-axis labels and increase font size
+      axis.text.y = element_text(size = 12),  # Increase y-axis labels font size
+      axis.title.x = element_text(size = 14),  # Increase x-axis title font size
+      axis.title.y = element_text(size = 14),  # Increase y-axis title font size
+      axis.line = element_line(colour = "black")  # Add axis lines
+    )+
+  labs(title = "Celltype Proportions Across Time Points", 
+       x = "Time Point", 
+       y = "Proportion of Cells") 
+ggsave("%s/Figure6F.pdf", width = 12, height = 8)
